@@ -3,6 +3,7 @@ from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from hyperopt import hp
 from sklearn.metrics import log_loss, brier_score_loss, roc_auc_score, f1_score, balanced_accuracy_score
+from collections import namedtuple
 
 
 TARGET = 'target'
@@ -10,7 +11,7 @@ TEST_SET_START_YEAR = 2017
 CV_SCORING = 'neg_log_loss'
 CLASS_CUTOFF = 0.5
 CV_SPLITS = 3
-DROP_COLUMNS = ['team_yearID', 'teamIDwinner', 'team_teamID']
+DROP_COLUMNS = ['team_yearID', 'team_teamID', 'yearID', 'teamIDwinner']
 
 
 FOREST_PARAM_GRID = {
@@ -31,6 +32,7 @@ XGBOOST_PARAM_GRID = {
     'model__learning_rate': hp.uniform('model__learning_rate', 0.01, 0.5),
     'model__n_estimators': hp.randint('model__n_estimators', 75, 150),
     'model__max_depth': hp.randint('model__max_depth', 2, 16),
+    'model__min_child_weight': hp.uniformint('model__min_child_weight', 2, 16)
 }
 
 
@@ -42,21 +44,17 @@ LIGHTGBM_PARAM_GRID = {
 }
 
 
-CAT_BOOST_PARAM_GRID = {
-    'model__depth': hp.randint('model__depth', 2, 16),
-    'model__l2_leaf_reg': hp.randint('model__l2_leaf_reg', 1, 10),
-    'model__learning_rate': hp.uniform('model__learning_rate', 0.01, 0.5),
-    'model__min_data_in_leaf': hp.uniformint('model__min_data_in_leaf', 1, 10)
-}
-
-
-MODEL_TRAINING_DICT = {
-    'random_forest': [RandomForestClassifier(), FOREST_PARAM_GRID, 50],
-    'extra_trees': [ExtraTreesClassifier(), FOREST_PARAM_GRID, 50],
-    'gradient_boosting': [GradientBoostingClassifier(), GRADIENT_BOOSTING_PARAM_GRID, 50],
-    'xgboost': [XGBClassifier(), XGBOOST_PARAM_GRID, 50],
-    'light_gbm': [LGBMClassifier(), LIGHTGBM_PARAM_GRID, 50],
-}
+model_named_tuple = namedtuple('model_config', {'model_name', 'model', 'param_grid', 'iterations'})
+MODEL_TRAINING_LIST = [
+    model_named_tuple(model_name='random_forest', model=RandomForestClassifier(), param_grid=FOREST_PARAM_GRID,
+                      iterations=100),
+    model_named_tuple(model_name='extra_trees', model=ExtraTreesClassifier(), param_grid=FOREST_PARAM_GRID,
+                      iterations=100),
+    model_named_tuple(model_name='gradient_boosting', model=GradientBoostingClassifier(),
+                      param_grid=GRADIENT_BOOSTING_PARAM_GRID, iterations=100),
+    model_named_tuple(model_name='xgboost', model=XGBClassifier(), param_grid=XGBOOST_PARAM_GRID, iterations=100),
+    model_named_tuple(model_name='light_gbm', model=LGBMClassifier(), param_grid=LIGHTGBM_PARAM_GRID, iterations=100),
+]
 
 
 MODEL_EVALUATION_LIST = [

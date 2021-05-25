@@ -1,18 +1,60 @@
 import numpy as np
 import pandas as pd
 import os
+import re
 
-from copy import deepcopy
 from sklearn.base import BaseEstimator, TransformerMixin
+from datetime import datetime
+
+
+def create_uid(base_str):
+    """
+    Creates a UID by concatenating the current timestamp with a base string.
+
+    :param base_str: string to concat the time to
+    :returns: str
+    """
+    now = datetime.now()
+    uid = base_str + '_' + str(now).replace(' ', '').replace('.', '').replace(':', '').replace('-', '')
+    return uid
+
+
+def convert_camel_case_to_snake_case(df):
+    """
+    Converts dataframe column headers from snakeCase to camel_case.
+
+    :param df: any valid pandas dataframe
+    :return: pandas dataframe
+    """
+    new_columns = []
+    for column in list(df):
+        new_column = re.sub(r'(?<!^)(?=[A-Z])', '_', column).lower()
+        new_columns.append(new_column)
+    df.columns = new_columns
+    return df
 
 
 def make_directories_if_not_exists(directories_list):
+    """
+    Makes directories if they do not exist.
+
+    :param directories_list: list of directories to create
+    """
     for directory in directories_list:
         if not os.path.exists(directory):
             os.makedirs(directory)
 
 
 def clean_batting_and_pitching_players(batting_df, pitching_df, positions_df):
+    """
+    Removes players from batting_df who are pitchers. Likewise, removes players from the pitching_df who are not
+    pitchers. This is all based on the information in positions_df.
+
+    :param batting_df: dataframe of batting stats
+    :param pitching_df: dataframe of pitching stats
+    :param positions_df: dataframe of the positions played by a player
+    :returns: batting_df, pitching_df
+    """
     positions_df['pitching_percentage'] = positions_df['G_p'] / positions_df['G_all']
     pitchers_df = positions_df.loc[positions_df['pitching_percentage'] >= 0.99]
     pitchers_df['remove_id'] = pitchers_df['playerID'] + pitchers_df['yearID'].astype(str)
@@ -29,23 +71,13 @@ def clean_batting_and_pitching_players(batting_df, pitching_df, positions_df):
     return batting_df, pitching_df
 
 
-def add_rows_for_2021(df, id_column_name):
-    blank_df = pd.DataFrame(columns=list(df))
-    df_copy = deepcopy(df)
-    df_copy = df_copy.loc[df_copy['yearID'] == 2020]
-    ids = list(df_copy[id_column_name].unique())
-    append_df = pd.DataFrame()
-
-    for player in ids:
-        id_df = pd.DataFrame({id_column_name: [player], 'yearID': [2021]})
-        id_df = pd.concat([blank_df, id_df], axis=0)
-        append_df = append_df.append(id_df)
-
-    df = pd.concat([df, append_df], axis=0)
-    return df
-
-
 def calculate_expanding_obp(df):
+    """
+    Calculates an expanding on base percentage.
+
+    :param df: pandas dataframe of raw batting stats
+    :returns: pandas dataframe
+    """
     coerce_numeric_list = ['H', 'BB', 'HBP', 'AB', 'SF', '2B', '3B', 'HR', 'IBB', 'G']
     for variable in coerce_numeric_list:
         df[variable] = pd.to_numeric(df[variable], errors='coerce')
@@ -82,6 +114,12 @@ def calculate_expanding_obp(df):
 
 
 def calculate_expanding_era(df):
+    """
+    Calculates expanding earned run average.
+
+    :param df: pandas dataframe with pitching stats
+    :returns: dataframe
+    """
     df.drop('ERA', 1, inplace=True)
     df['ER'] = df.groupby('playerID')['ER'].shift()
     df['IPouts'] = df.groupby('playerID')['IPouts'].shift()
@@ -94,6 +132,14 @@ def calculate_expanding_era(df):
 
 
 def find_total_and_lagged_all_star_appearances(df, year_lags):
+    """
+    Finds the total number of all-star appearances in a player's career. Also finds the total number of all-star
+    appearances for every year until the end of a lookback window, defined by year_lags.
+
+    :param df: pandas dataframe including all-star appearances
+    :param year_lags: number of years to lookback for calculating all-star appearances for a window calculation
+    :returns: pandas dataframe
+    """
     df.dropna(subset=['yearID'], inplace=True)
     df['yearID'] = df['yearID'].astype(int)
     df_2020 = df.loc[df['yearID'] == 2019]
@@ -124,7 +170,6 @@ def find_total_and_lagged_all_star_appearances(df, year_lags):
         main_players_df = main_players_df.append(player_df)
 
     df = pd.merge(main_players_df, df, how='left', on=['playerID', 'yearID'])
-
     df.fillna({'all_star': 0}, inplace=True)
     df['expanding_as_appearances'] = df.groupby('playerID')['all_star'].cumsum()
     df['expanding_as_appearances'] = df.groupby('playerID')['expanding_as_appearances'].shift(1)
@@ -133,6 +178,13 @@ def find_total_and_lagged_all_star_appearances(df, year_lags):
 
 
 def find_player_age(player_df, stats_df):
+    """
+    Finds a players age.
+
+    :param player_df: dataframe with birth information
+    :param stats_df: dataframe with player stats for every given year
+    :returns: pandas dataframe
+    """
     player_df = player_df.dropna(subset=['birthYear', 'birthMonth', 'birthDay'])
     player_df['birth_date'] = player_df['birthYear'].astype(int).astype(str) + '-' + \
                               player_df['birthMonth'].astype(int).astype(str) + '-' + \
@@ -146,7 +198,15 @@ def find_player_age(player_df, stats_df):
     return stats_df
 
 
-def find_yearly_team_winning_percentage(df, year_lags):
+def find_yearly_team_winning_percentages(df, year_lags):
+    """
+    Finds the team's winning percentage every year until the end of a lookback window, defined by year_lags. Also
+    calculates the rolling 3 year and 5 year winning percentages.
+
+    :param df: pandas dataframe of team wins and losses
+    :param year_lags:: number of years to lookback for calculating winning percentages for a window calculation
+    :returns: pandas dataframe
+    """
     df['winning_percentage'] = df['W'] / (df['W'] + df['L'])
     for lag in range(1, year_lags + 1):
         df[f'winning_percentage_lag_{lag}'] = df.groupby('teamID')['winning_percentage'].shift(lag)
@@ -159,6 +219,13 @@ def find_yearly_team_winning_percentage(df, year_lags):
 
 
 def find_postseason_results(df, year_lags):
+    """
+    Finds the team's postseason every year until the end of a lookback window, defined by year_lags.
+
+    :param df: pandas dataframe of team postseason results
+    :param year_lags:: number of years to lookback for calculating winning percentages for a window calculation
+    :returns: pandas dataframe
+    """
     winner_df = df[['yearID', 'round', 'teamIDwinner']]
     winner_df['round'] = winner_df['round'] + ' - winner'
     winner_df.rename(columns={'teamIDwinner': 'teamID'}, inplace=True)
@@ -194,6 +261,12 @@ def find_postseason_results(df, year_lags):
 
 
 def create_target_dataframe(df):
+    """
+    Creates a dataframe of our target: the team who won the World Series.
+
+    :param df: pandas dataframe including the team who won the World Series
+    :returns: pandas dataframe
+    """
     ws_df = df.loc[df['round'] == 'WS']
     ws_df = ws_df[['yearID', 'teamIDwinner']]
     ws_df['target'] = 1
@@ -201,6 +274,12 @@ def create_target_dataframe(df):
 
 
 def flatten_data_to_team_and_year(df):
+    """
+    Flattens the dataframe to be one row for every tear amd year.
+
+    :param df: pandas dataframe
+    :returns: pandas dataframe
+    """
     aggregates_df = df.groupby(['team_yearID', 'team_teamID']).agg({
         'batting_ops': 'median',
         'pitching_era': 'median',
@@ -222,12 +301,13 @@ def flatten_data_to_team_and_year(df):
     return df
 
 
-def clean_player_names(df):
-    df['nameFirst'] = df['nameFirst'].str.replace('A. J.', 'AJ')
-    return df
-
-
 def consolidate_yearly_player_data(df):
+    """
+    For players who played for multiple teams in a year, consolidate that stats onto a single row.
+
+    :param df: pandas dataframe
+    :returns: pandas dataframe
+    """
     df['player_year_dupe'] = df.duplicated(subset=['playerID', 'yearID'], keep=False)
     dupe_df = df.loc[df['player_year_dupe'] == True]
     df = df.loc[df['player_year_dupe'] != True]
@@ -251,55 +331,14 @@ def consolidate_yearly_player_data(df):
     return df
 
 
-def map_id_to_player_name(player_df, roster_df, name_id_mapping, name_id_team_mapping):
-    """
-    The Wikipedia roster scraper only returns a player's name, not a playerID we can use with the Lahman database. This
-    function maps those names to the correct player ID.
-
-    :param player_df: Lahman database people data
-    (https://github.com/chadwickbureau/baseballdatabank/blob/master/core/People.csv?raw=true)
-    :type player_df: pandas dataframe
-    :param roster_df: spring training rosters scraped from Wikipedia
-    :type roster_df: pandas dataframe
-    :param name_id_mapping: for a player_name that appears multiples times, a mapping of the correct name to ID
-    :type name_id_mapping: dict
-    :param name_id_team_mapping: for player_name that appears on multiple teams, a mapping of the correct name to ID
-    :type name_id_team_mapping: dict
-    """
-    player_df = player_df.loc[player_df['birthYear'] >= 1975]
-    player_df['player_name'] = player_df['nameFirst'] + ' ' + player_df['nameLast']
-    player_df = player_df[['player_name', 'playerID']]
-    roster_df = pd.merge(roster_df, player_df, how='left', on='player_name')
-
-    for player_name, player_id in name_id_mapping.items():
-        roster_df.loc[roster_df['player_name'] == player_name, 'playerID'] = player_id
-
-    for player_name, player_mapping in name_id_team_mapping.items():
-        for team, player_id in player_mapping.items():
-            roster_df.loc[(roster_df['player_name'] == player_name) & (roster_df['teamID'] == team),
-                          'playerID'] = player_id
-
-    roster_df.drop_duplicates(inplace=True)
-    roster_df.drop('player_name', 1, inplace=True)
-    return roster_df
-
-
-def add_2021_batters_and_pitchers(batting_df, pitching_df, batting_2021_df, pitching_2021_df):
-    batting_df = pd.concat([batting_df, batting_2021_df], axis=0)
-    batting_df.reset_index(inplace=True)
-    pitching_df = pd.concat([pitching_df, pitching_2021_df], axis=0)
-    pitching_df.reset_index(inplace=True)
-    return batting_df, pitching_df
-
-
-def prep_team_level_dataframes(team_records_df, postseason_df):
-    team_records_df = add_rows_for_2021(team_records_df, 'teamID')
-    team_records_df = find_yearly_team_winning_percentage(team_records_df, 5)
-    postseason_df = find_postseason_results(postseason_df, 5)
-    return team_records_df, postseason_df
-
-
 def calculate_batting_stats(player_df, batting_df):
+    """
+    Omnibus function for calculating batting stats.
+
+    :param player_df: dataframe of general player attributes
+    :param batting_df: dataframe of batting stats
+    :returns: pandas dataframe
+    """
     batting_df.reset_index(inplace=True)
     batting_df.rename(columns={'index': 'order'}, inplace=True)
     batting_df = consolidate_yearly_player_data(batting_df)
@@ -310,6 +349,13 @@ def calculate_batting_stats(player_df, batting_df):
 
 
 def calculate_pitching_stats(player_df, pitching_df):
+    """
+    Omnibus function for calculating batting stats.
+
+    :param player_df: dataframe of general player attributes
+    :param pitching_df: dataframe of pitching stats
+    :returns: pandas dataframe
+    """
     pitching_df.reset_index(inplace=True)
     pitching_df.rename(columns={'index': 'order'}, inplace=True)
     pitching_df = consolidate_yearly_player_data(pitching_df)
@@ -320,6 +366,14 @@ def calculate_pitching_stats(player_df, pitching_df):
 
 
 def append_all_star_appearances(all_star_df, batting_df, pitching_df):
+    """
+    Appends all-star appearances to batting and and pitching dataframes.
+
+    :param all_star_df: dataframe of all-star appearances
+    :param batting_df: dataframe of batting stats
+    :param pitching_df: dataframe of pitching stats
+    :returns: pandas dataframe
+    """
     all_star_df = find_total_and_lagged_all_star_appearances(all_star_df, 5)
     batting_df = pd.merge(batting_df, all_star_df, how='left', on=['playerID', 'yearID'])
     pitching_df = pd.merge(pitching_df, all_star_df, how='left', on=['playerID', 'yearID'])
@@ -327,6 +381,14 @@ def append_all_star_appearances(all_star_df, batting_df, pitching_df):
 
 
 def add_column_name_prefixes(team_records_df, batting_df, pitching_df):
+    """
+    Adds prefixes to every column in a set of dataframes.
+
+    :param team_records_df: dataframe containing yearly team records
+    :param batting_df: dataframe of batting stats
+    :param pitching_df: dataframe of pitching stats
+    :returns: tuple of three pandas dataframes
+    """
     team_records_df = team_records_df.add_prefix('team_')
     batting_df = batting_df.add_prefix('batting_')
     pitching_df = pitching_df.add_prefix('pitching_')
@@ -334,6 +396,15 @@ def add_column_name_prefixes(team_records_df, batting_df, pitching_df):
 
 
 def merge_dataframes(team_records_df, postseason_df, batting_df, pitching_df):
+    """
+    Merges team records and postseason results onto batting and pitching stats.
+
+    :param team_records_df: dataframe of team records
+    :param postseason_df: dataframe of postseason results
+    :param batting_df: dataframe of batting stats
+    :param pitching_df: dataframe of pitching stats
+    :returns: tuple of three dataframes
+    """
     teams_df = pd.merge(team_records_df, postseason_df, how='left', left_on=['team_teamID', 'team_yearID'],
                         right_on=['teamID', 'yearID'])
     teams_batting_df = pd.merge(teams_df, batting_df, how='left', left_on=['team_teamID', 'team_yearID'],
@@ -343,7 +414,25 @@ def merge_dataframes(team_records_df, postseason_df, batting_df, pitching_df):
     return teams_df, teams_batting_df, teams_pitching_df
 
 
-def create_modeling_and_prediction_dataframes(teams_df, teams_batting_df, teams_pitching_df, target_df):
+def prep_team_level_dataframes(team_records_df, postseason_df):
+    """
+    Omnibus function to prepare team records and postseason dataframes.
+
+    :param team_records_df: dataframe of team records
+    :param postseason_df: dataframe of postseason results
+    :returns: tuple of dataframes
+    """
+    team_records_df = find_yearly_team_winning_percentages(team_records_df, 5)
+    postseason_df = find_postseason_results(postseason_df, 5)
+    return team_records_df, postseason_df
+
+
+def create_modeling_dataframe(teams_df, teams_batting_df, teams_pitching_df, target_df):
+    """
+    Creates dataframe for modeling. This consists of one row for every team for every year. The target is the team who
+    won the world series in the upcoming year.
+
+    """
     teams_df = pd.concat([teams_df, teams_batting_df, teams_pitching_df], axis=0)
     teams_df.reset_index(inplace=True, drop=True)
     teams_df = teams_df.loc[teams_df['team_yearID'] >= 1905]
@@ -365,20 +454,18 @@ def create_modeling_and_prediction_dataframes(teams_df, teams_batting_df, teams_
                         right_on=['yearID', 'teamIDwinner'])
     teams_df.fillna({'target': 0}, inplace=True)
     teams_df['target'] = teams_df['target'].astype(int)
-    teams_df.loc[teams_df['team_yearID'] == 2021, 'target'] = -1
     teams_df.fillna(value=0, inplace=True)
     return teams_df
 
 
-def split_modeling_and_prediction_dataframes(teams_df):
-    modeling_df = teams_df.loc[teams_df['target'] >= 0]
-    prediction_df = teams_df.loc[teams_df['target'] < 0]
-    modeling_df.drop(['yearID'], 1, inplace=True)
-    prediction_df.drop(['yearID', 'target'], 1, inplace=True)
-    return modeling_df, prediction_df
-
-
 def create_train_test_split(df, target, test_set_start):
+    """
+    Creates a train-test split, with every row after test_set_start being assigned to the test set.
+
+    :param df: pandas dataframe
+    :param target: name of the target column
+    :param test_set_start: year to begin the test set
+    """
     test_df = df.loc[df['team_yearID'] >= test_set_start]
     train_df = df.loc[df['team_yearID'] < test_set_start]
     y_train = train_df[target]
@@ -388,31 +475,35 @@ def create_train_test_split(df, target, test_set_start):
     return x_train, x_test, y_train, y_test
 
 
-def create_custom_cv_splits(df, year_bin_list):
-    df.reset_index(inplace=True, drop=True)
-    df['cv_bin'] = pd.cut(df['yearID'], bins=year_bin_list)
-    df['cv_bin'] = df['cv_bin'].astype(str)
-    cv_splits = []
-    cv_bins = list(df['cv_bin'].unique())
-    for cv_bin in cv_bins:
-        temp_train_ids = df.loc[df['cv_bin'] != cv_bin].index.values.astype(int)
-        temp_test_ids = df.loc[df['cv_bin'] == cv_bin].index.values.astype(int)
-        cv_splits.append((temp_train_ids, temp_test_ids))
-    df.drop(['cv_bin'], 1, inplace=True)
-    return cv_splits
-
-
 def drop_columns(df, drop_cols):
+    """
+    Drops columns from a pandas dataframe
+
+    :param df: pandas dataframe
+    :param drop_cols: list of columns to drop
+    :returns: pandas dataframe
+    """
     df = df.drop(drop_cols, 1)
     return df
 
 
 def subtract_columns(df, col1, col2):
+    """
+    Subtracts two pandas dataframe columns to create a new column.
+
+    :param df: pandas dataframe
+    :param col1: string name of first column
+    :param col2: string name of second column
+    :returns: pandas dataframe
+    """
     df[f'{col1}_{col2}_diff'] = df[col1] - df[col2]
     return df
 
 
 class FeaturesToDict(BaseEstimator, TransformerMixin):
+    """
+    Transformer to cast features to a dictionary.
+    """
     def __int__(self):
         pass
 
