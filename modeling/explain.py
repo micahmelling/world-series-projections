@@ -43,10 +43,9 @@ def _run_parallel_shap_explainer(x_df, explainer, boosting_model):
     :param boosting_model: Boolean of whether or not the explainer is for a boosting model
     """
     array_split = np.array_split(x_df, mp.cpu_count())
-    pool = mp.Pool(processes=mp.cpu_count())
     shap_fn = partial(_run_shap_explainer, explainer=explainer, boosting_model=boosting_model)
-    result = pool.map(shap_fn, array_split)
-    pool.close()
+    with mp.Pool(processes=mp.cpu_count()) as pool:
+        result = pool.map(shap_fn, array_split)
     result = np.concatenate(result)
     return result
 
@@ -229,7 +228,6 @@ def run_drop_column_importance(pipeline, x_train, y_train, x_df, y_test, scorer,
     :param model_uid: model uid
     :param higher_is_better: whether or not a higher score is better
     """
-    print('running drop column feature importance...this might take a while...')
     pipeline_ = deepcopy(pipeline)
     pipeline_.fit(x_train, y_train)
     baseline_score = _score_drop_col_model(pipeline_, x_df, y_test, scoring_type, scorer)
@@ -237,9 +235,8 @@ def run_drop_column_importance(pipeline, x_train, y_train, x_df, y_test, scorer,
                                 x_df=x_df, y_test=y_test, baseline_score=baseline_score, scoring_type=scoring_type,
                                 scorer=scorer)
     columns = list(x_train)
-    pool = mp.Pool(processes=mp.cpu_count())
-    result = pool.map(drop_col_train_fn, columns)
-    pool.close()
+    with mp.Pool(processes=mp.cpu_count()) as pool:
+        result = pool.map(drop_col_train_fn, columns)
     df = pd.DataFrame.from_records(result)
     df.sort_values(by=['importance'], ascending=higher_is_better, inplace=True)
     make_directories_if_not_exists([os.path.join(model_uid, 'diagnostics', 'drop_col_importance')])
@@ -280,10 +277,9 @@ def produce_partial_dependence_plots(model, x_df, plot_kind, feature_vocabulary,
     """
     model.fitted_ = True
     make_directories_if_not_exists([os.path.join(model_uid, 'diagnostics', 'pdp')])
-    pool = mp.Pool(processes=mp.cpu_count())
     pdp_plot_fn = partial(_plot_partial_dependence, model=model, x_df=x_df, plot_kind=plot_kind, model_uid=model_uid)
-    result = pool.map(pdp_plot_fn, feature_vocabulary)
-    pool.close()
+    with mp.Pool(processes=mp.cpu_count()) as pool:
+        result = pool.map(pdp_plot_fn, feature_vocabulary)
 
 
 def create_feature_name_mapping_iterable(pipeline, return_tuple=True):
@@ -362,10 +358,9 @@ def produce_accumulated_local_effects_plots(x_df, model, feature_vocabulary, mod
     :param model_uid: model uid
     """
     make_directories_if_not_exists([os.path.join(model_uid, 'diagnostics', 'ale')])
-    pool = mp.Pool(processes=mp.cpu_count())
     ale_plot_fn = partial(_produce_ale_plot, model=model, x_df=x_df, model_uid=model_uid)
-    result = pool.map(ale_plot_fn, feature_vocabulary)
-    pool.close()
+    with mp.Pool(processes=mp.cpu_count()) as pool:
+        result = pool.map(ale_plot_fn, feature_vocabulary)
 
 
 def run_omnibus_model_explanation(pipeline, x_df, y_test, x_train, y_train, scorer, scorer_string, scoring_type,
@@ -410,5 +405,5 @@ def run_omnibus_model_explanation(pipeline, x_df, y_test, x_train, y_train, scor
         boosting_model = False
         
     produce_shap_values_and_plots(model, x_df_original_names_df, model_uid, boosting_model, False)
-    run_drop_column_importance(pipeline, x_train, y_train, x_df, y_test, scorer, scoring_type, model_uid, 
+    run_drop_column_importance(pipeline, x_train, y_train, x_df, y_test, scorer, scoring_type, model_uid,
                                higher_is_better)
